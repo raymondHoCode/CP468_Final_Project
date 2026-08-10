@@ -51,6 +51,12 @@ def train_epoch(model, train_loader, criterion, optimizer, device,
 
         total_loss += loss.item()
         n_batches += 1
+
+        # mid-epoch progress: print every 100 batches
+        if n_batches % 100 == 0:
+            print(f"  batch {n_batches}: loss {total_loss / n_batches:.4f}",
+                  flush=True)
+
     return total_loss / n_batches
 
 
@@ -73,7 +79,7 @@ def evaluate(model, valid_loader, criterion, device):
     return total_loss / n_batches
 
 
-def monitor_copy_trap(model, dataset, vocab, device, n=5, max_len=100):
+def monitor_copy_trap(model, dataset, vocab, device, n=20, max_len=100):
     # greedy-decode n fixed validation examples and compare to the source,
     # to check the model isn't just echoing its input.
     # NOTE: greedy_decode sets model.eval() internally; the caller must call
@@ -112,6 +118,12 @@ def main():
         description="Train the LSTM seq2seq text simplifier.")
     parser.add_argument("--data-dir", default="data",
                         help="dir with train.src/train.dst/valid.src/valid.ref.0")
+    parser.add_argument("--train-src", default="train.src",
+                        help="training source file in data-dir "
+                             "(e.g. train.small.src for the subset)")
+    parser.add_argument("--train-dst", default="train.dst",
+                        help="training target file in data-dir "
+                             "(e.g. train.small.dst for the subset)")
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -132,8 +144,8 @@ def main():
     print(f"device: {device}")
 
     # shared vocab from training data only
-    train_src = os.path.join(args.data_dir, "train.src")
-    train_dst = os.path.join(args.data_dir, "train.dst")
+    train_src = os.path.join(args.data_dir, args.train_src)
+    train_dst = os.path.join(args.data_dir, args.train_dst)
     valid_src = os.path.join(args.data_dir, "valid.src")
     valid_ref = os.path.join(args.data_dir, "valid.ref.0")
     lines = read_file(train_src) + read_file(train_dst)
