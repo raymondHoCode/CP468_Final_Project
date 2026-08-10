@@ -13,7 +13,7 @@ English sentences, trained and evaluated on standard text-simplification corpora
   processes real tokens, bridges its bidirectional final states down to the decoder's
   initial state, and attention is masked so padding never receives weight. Training uses
   teacher forcing with a configurable ratio; decoding at evaluation is greedy.
-- **Data:** WikiAuto (ACL 2020) for training/validation and ASSET for testing, pulled and
+- **Data:** WikiAuto (ACL 2020) for training and ASSET for validation/testing, pulled and
   cleaned by `data_script.py` (unescapes PTB-style tokens, drops identical / too-short /
   too-long / target-longer pairs). The ASSET test set has 10 reference simplifications per
   sentence.
