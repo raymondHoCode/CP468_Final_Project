@@ -20,8 +20,8 @@ English sentences, trained and evaluated on standard text-simplification corpora
 - **Evaluation:** `evaluate_model.py` scores the trained model on the ASSET test set with
   **SARI** (primary), **BLEU** (secondary), and **identical_ratio** (a copy-trap: the
   fraction of outputs that are verbatim copies of the input). It also scores a **copy
-  baseline** (output = input) through the same pipeline so the LSTM is judged against a
-  trivial upper bound on BLEU / lower bound on SARI.
+  baseline** (output = input) through the same pipeline so the LSTM is judged against an
+  upper bound on BLEU / and reference point on SARI.
 
 ## Setup
 
@@ -43,9 +43,21 @@ Then install dependencies:
 pip install -r requirements.txt
 ```
 
-`requirements.txt` pins `torch==2.13.0` and `numpy==2.5.2`. SARI/BLEU scoring falls back
-to `sacrebleu` if EASSE is not installed (see the note in `evaluate_model.py`) - install it
-with `pip install sacrebleu` if you want the fallback path.
+`requirements.txt` pins `torch==2.13.0`, `numpy==2.5.2`, and `sacrebleu==2.6.0`.
+`evaluate_model.py` prefers **EASSE** for SARI and falls back to a vendored
+port of EASSE's corpus SARI if EASSE isn't importable; `sacrebleu`
+provides BLEU (sacrebleu does NOT implement SARI).
+
+EASSE is the SARI implementation that produced the recorded numbers below, but it is
+**git-only** (not on PyPI) and pulls in a heavy, older dependency tree, so it is
+intentionally kept out of `requirements.txt`. To use it (optional):
+
+```bash
+pip install git+https://github.com/feralvam/easse.git
+```
+
+If EASSE isn't installed, evaluation still runs and reports the same SARI via the
+vendored port in `evaluate_model.py` (see the note there).
 
 ## Reproducing the results
 
