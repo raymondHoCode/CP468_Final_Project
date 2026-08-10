@@ -1,0 +1,4 @@
+# CP468 Final Project - LSTM seq2seq text simplification required dependencies
+
+torch==2.13.0
+numpy==2.5.2
