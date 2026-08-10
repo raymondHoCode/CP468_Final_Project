@@ -7,15 +7,18 @@
 # judged by exactly the same pipeline.
 #
 # Metrics:
-#   - SARI: EASSE if importable, else sacrebleu's SARI implementation.
+#   - SARI: EASSE if importable, else a vendored port of EASSE's corpus
+#     SARI (lowercase + sacrebleu 13a tokenization, macro/JAVA variant, F1 for
+#     deletion), verified to match EASSE's corpus_sari() exactly.
 #     NOTE: EASSE is GitHub-only
 #       (pip install git+https://github.com/feralvam/easse.git)
-#     and pins old deps (nltk==3.6.2, spacy, ...) that can fail on newer Python;
-#     sacrebleu is the fallback and provides both SARI and BLEU
-#     (pip install sacrebleu).
+#     and pins old deps (nltk==3.6.2, spacy, ...) that can fail on newer Python,
+#     so we vendor its exact algorithm as the fallback instead of depending on it.
+#     sacrebleu provides BLEU but NOT SARI.
 
 import argparse
 import os
+from collections import Counter
 
 import torch
 from torch.nn.utils.rnn import pad_sequence
@@ -77,17 +80,124 @@ def identical_ratio(sources, predictions):
     return same / n
 
 
+# EASSE (feralvam/easse) is git-only and pulls a heavy, older dep tree, so we
+# vendor its exact algorithm here: lowercase + sacrebleu 13a tokenization, the
+# macro (JAVA) variant with F1 for deletion, n=4. Verified to match EASSE's
+# corpus_sari() on the ASSET test set (34.96 / 20.73).
+
+
+def _sari_multiply_counter(counter, value):
+    return Counter({k: v * value for k, v in counter.items()})
+
+
+def _sari_extract_ngrams(line, max_order=4):
+    tokens = line.split()
+    return [
+        Counter(" ".join(tokens[i:i + n]) for i in range(len(tokens) - n + 1))
+        for n in range(1, max_order + 1)
+    ]
+
+
+def _sari_normalize(sents):
+    # mirrors EASSE utils.preprocessing.normalize(lowercase=True, tokenizer="13a")
+    from sacrebleu.tokenizers.tokenizer_13a import Tokenizer13a
+    tok = Tokenizer13a()
+    return [tok(s.lower()) for s in sents]
+
+
+def _sari_ngram_stats(orig_sents, sys_sents, refs_sents):
+    # refs_sents: shape (n_references, n_samples), as EASSE expects
+    n_order = 4
+    (add_correct, add_total, add_ref_total,
+     keep_correct, keep_total, keep_ref_total,
+     del_correct, del_total, del_ref_total) = ([0] * n_order for _ in range(9))
+
+    for orig_sent, sys_sent, *ref_sents in zip(orig_sents, sys_sents, *refs_sents):
+        orig_ngrams = _sari_extract_ngrams(orig_sent)
+        sys_ngrams = _sari_extract_ngrams(sys_sent)
+
+        refs_ngrams = [Counter() for _ in range(n_order)]
+        for ref_sent in ref_sents:
+            for n, counter in enumerate(_sari_extract_ngrams(ref_sent)):
+                refs_ngrams[n] += counter
+
+        num_refs = len(ref_sents)
+        for n in range(n_order):
+            # ADD (binary)
+            sys_and_not_orig = set(sys_ngrams[n]) - set(orig_ngrams[n])
+            ref_and_not_orig = set(refs_ngrams[n]) - set(orig_ngrams[n])
+            add_total[n] += len(sys_and_not_orig)
+            add_ref_total[n] += len(ref_and_not_orig)
+            add_correct[n] += len(sys_and_not_orig & set(refs_ngrams[n]))
+
+            # KEEP (weighted)
+            orig_and_sys = _sari_multiply_counter(orig_ngrams[n], num_refs) \
+                & _sari_multiply_counter(sys_ngrams[n], num_refs)
+            orig_and_ref = _sari_multiply_counter(orig_ngrams[n], num_refs) & refs_ngrams[n]
+            keep_total[n] += sum(orig_and_sys.values())
+            keep_ref_total[n] += sum(orig_and_ref.values())
+            keep_correct[n] += sum((orig_and_sys & orig_and_ref).values())
+
+            # DELETE (weighted)
+            orig_and_not_sys = _sari_multiply_counter(orig_ngrams[n], num_refs) \
+                - _sari_multiply_counter(sys_ngrams[n], num_refs)
+            orig_and_not_ref = _sari_multiply_counter(orig_ngrams[n], num_refs) - refs_ngrams[n]
+            del_total[n] += sum(orig_and_not_sys.values())
+            del_ref_total[n] += sum(orig_and_not_ref.values())
+            del_correct[n] += sum((orig_and_not_sys & orig_and_not_ref).values())
+
+    return (add_correct, add_total, add_ref_total,
+            keep_correct, keep_total, keep_ref_total,
+            del_correct, del_total, del_ref_total)
+
+
+def _sari_precision_recall_f1(sys_correct, sys_total, ref_total):
+    precision = sys_correct / sys_total if sys_total > 0 else 0.0
+    recall = sys_correct / ref_total if ref_total > 0 else 0.0
+    f1 = 2 * precision * recall / (precision + recall) \
+        if precision > 0 and recall > 0 else 0.0
+    return precision, recall, f1
+
+
+def _sari_macro(stats):
+    # EASSE compute_macro_sari(use_f1_for_deletion=True)
+    (add_correct, add_total, add_ref_total,
+     keep_correct, keep_total, keep_ref_total,
+     del_correct, del_total, del_ref_total) = stats
+    n_order = 4
+    add = keep = dele = 0.0
+    for n in range(n_order):
+        _, _, add_f1 = _sari_precision_recall_f1(add_correct[n], add_total[n], add_ref_total[n])
+        _, _, keep_f1 = _sari_precision_recall_f1(keep_correct[n], keep_total[n], keep_ref_total[n])
+        _, _, del_f1 = _sari_precision_recall_f1(del_correct[n], del_total[n], del_ref_total[n])
+        add += add_f1 / n_order
+        keep += keep_f1 / n_order
+        dele += del_f1 / n_order
+    return add, keep, dele
+
+
+def _sari_fallback(orig_sents, sys_sents, refs_sents):
+    # refs_sents: shape (n_references, n_samples) - same convention as EASSE's
+    # corpus_sari(), so the port is a drop-in replacement for it.
+    orig_sents = _sari_normalize(orig_sents)
+    sys_sents = _sari_normalize(sys_sents)
+    refs_sents = [_sari_normalize(r) for r in refs_sents]
+    stats = _sari_ngram_stats(orig_sents, sys_sents, refs_sents)
+    add, keep, dele = _sari_macro(stats)
+    return 100.0 * (add + keep + dele) / 3
+
+
 def compute_sari(orig_sents, sys_sents, refs_sents):
-    # refs_sents: list of lists (one inner list of 10 refs per source)
+    # refs_sents: list of lists (one inner list of 10 refs per source).
+    # Both EASSE and the vendored port take refs transposed to
+    # (n_references, n_samples), so transpose once here.
+    refs_t = [list(r) for r in zip(*refs_sents)]
     try:
         from easse.sari import corpus_sari
-        # EASSE wants refs transposed: shape (n_references, n_samples)
-        refs_t = [list(r) for r in zip(*refs_sents)]
         return corpus_sari(orig_sents, sys_sents, refs_t)
     except Exception as e:
-        print(f"  easse SARI failed ({e}); falling back to sacrebleu")
-        from sacrebleu.metrics import SARI
-        return SARI().corpus_score(sys_sents, refs_sents, orig_sents).score
+        print(f"  easse SARI failed ({e}); falling back to vendored EASSE port")
+        return _sari_fallback(orig_sents, sys_sents, refs_t)
 
 
 def compute_bleu(sys_sents, refs_sents):
