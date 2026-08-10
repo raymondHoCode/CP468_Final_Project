@@ -2,3 +2,9 @@
 
 torch==2.13.0
 numpy==2.5.2
+# SARI + BLEU scoring (evaluate_model.py). EASSE is the preferred SARI
+# implementation but is git-only (not on PyPI) and pulls in a heavy, older dep
+# tree, so it is intentionally kept out of this file - see README for the optional
+# install command. When EASSE is absent, evaluate_model.py uses a vendored
+# port of EASSE's SARI sacrebleu provides BLEU (and NOT SARI).
+sacrebleu==2.6.0
