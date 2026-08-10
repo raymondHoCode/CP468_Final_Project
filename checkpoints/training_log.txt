@@ -1,0 +1,10 @@
+device: cuda
+hardware: NVIDIA GeForce RTX 3060
+vocab size: 63819
+trainable parameters: 34909260
+epochs run: 8
+best val loss: 2.9265
+total wall-clock time: (approx 8 epochs x ~22 min/epoch)
+hyperparams: emb_dim=128, enc_hidden=256, dec_hidden=256, dropout=0.3, lr=0.001, batch_size=32, teacher_forcing_ratio=0.8, min_freq=4
+checkpoint: checkpoints/best_model.pt
+note: run reached epoch 8 (best val loss 2.9265, saved); epoch 9 was interrupted by a transient cuDNN error after the best checkpoint was already saved.
