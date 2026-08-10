@@ -1,0 +1,5 @@
+checkpoint: checkpoints/best_model.pt
+epoch: 8   best_val_loss: 2.9265
+system             SARI     BLEU  identical_ratio
+LSTM              34.96     5.59           0.0000
+copy baseline     20.73    52.33           1.0000
